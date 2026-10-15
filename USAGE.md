@@ -106,6 +106,8 @@ This mode uses the same forms and engine with an in-process queue. Accounts, wor
 
 ## Edit and extend workflows
 
+The editor has been upgraded to Flowcraft Studio, with code editing, data mappings, node previews, live execution inspection, undo/redo, import/export, and three working recipes. See [EDITOR_GUIDE.md](EDITOR_GUIDE.md) for the complete walkthrough.
+
 Open **Workflows**, then open a saved workflow. Click a node to inspect its configuration. Add blocks from the library, connect their handles, and configure each action. Condition nodes have separate TRUE and FALSE outputs. Comparison values support numbers, booleans, and plain text. Use the validation button before saving. Activate the workflow to accept webhooks or schedules; deactivate it to stop new trigger events.
 
 A webhook’s URL appears when you select its trigger after saving. The API accepts JSON only for active workflows and root webhook triggers. Treat webhook URLs as private integration endpoints; possession of an active URL allows submitting an event.

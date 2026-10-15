@@ -100,10 +100,10 @@ export async function executeDag(
       skippedNodes.add(next.id); remaining.delete(next.id); await emit({ type: 'node.skipped', nodeId: next.id }); continue;
     }
     const parentOutputs = activeIncoming.filter((edge) => !skippedNodes.has(edge.source)).map((edge) => outputs.get(edge.source));
-    await emit({ type: 'node.started', nodeId: next.id });
+    const input = parentOutputs.length === 0 ? initialInput : parentOutputs.length === 1 ? parentOutputs[0] : parentOutputs;
+    await emit({ type: 'node.started', nodeId: next.id, data: input });
     try {
-      const input = parentOutputs.length === 0 ? initialInput : parentOutputs.length === 1 ? parentOutputs[0] : parentOutputs;
-      const result = await registry.get(next.type).execute({ executionId, workflowId, input, variables: {} }, next.config);
+      const result = await registry.get(next.type).execute({ executionId, workflowId, input, variables: Object.fromEntries(outputs) }, next.config);
       outputs.set(next.id, result.data);
       if (result.branch) for (const edge of edges.filter((candidate) => candidate.source === next.id && candidate.sourceHandle && candidate.sourceHandle !== result.branch)) inactiveEdges.add(edge.id);
       await emit({ type: 'node.completed', nodeId: next.id, data: result.data });

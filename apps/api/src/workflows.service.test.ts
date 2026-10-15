@@ -190,3 +190,33 @@ test('blank and whitespace order identifiers route to missing ID review', async 
     assert.ok(record.events.some((event) => event.nodeId === route.id && event.type === 'node.completed'));
   }
 });
+
+test('an execution uses the graph captured when it was queued and records node inputs', async () => {
+  const jobs: QueuedJob[] = [];
+  const service = createService(jobs);
+  const saved = await service.save(workflow, 'owner-a');
+  const queued = await service.execute(saved.id!, 'owner-a', { amount: 42 });
+  await service.save({ ...saved, nodes: saved.nodes.map((node) => node.type === 'logger' ? { ...node, config: { message: 'Edited after queueing' } } : node) }, 'owner-a');
+  await jobs[0].runner();
+  const record = await service.getExecution(queued.executionId, 'owner-a');
+  assert.equal(record.status, 'SUCCESS');
+  const output = record.events.find((event) => event.nodeId === 'logger' && event.type === 'node.completed')!;
+  assert.deepEqual(output.data, { input: { amount: 42 }, message: 'hello' });
+  assert.deepEqual(record.events.find((event) => event.nodeId === 'logger' && event.type === 'node.started')?.data, { amount: 42 });
+  assert.deepEqual(record.input, { amount: 42 });
+});
+
+test('every active root schedule runs independently and deactivation clears all timers', async () => {
+  const jobs: QueuedJob[] = []; const service = createService(jobs);
+  try {
+    const saved = await service.save({ name: 'Two schedules', nodes: [
+      { id: 'first', type: 'scheduleTrigger', name: 'First schedule', position: { x: 0, y: 0 }, config: { intervalMs: 1000 } },
+      { id: 'second', type: 'scheduleTrigger', name: 'Second schedule', position: { x: 0, y: 200 }, config: { intervalMs: 1000 } },
+    ], edges: [] }, 'owner-a');
+    await service.setActive(saved.id!, true, 'owner-a');
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.deepEqual(new Set(jobs.map(({ job }) => job.triggerNodeId)), new Set(['first', 'second']));
+    await service.setActive(saved.id!, false, 'owner-a'); const count = jobs.length;
+    await new Promise((resolve) => setTimeout(resolve, 1100)); assert.equal(jobs.length, count);
+  } finally { service.onModuleDestroy(); }
+});

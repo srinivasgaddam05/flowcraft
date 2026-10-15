@@ -71,6 +71,8 @@ model Execution {
   workflowId String
   status ExecutionStatus @default(QUEUED)
   triggerData Json?
+  triggerNodeId String?
+  workflowSnapshot Json?
   error String?
   startedAt DateTime?
   completedAt DateTime?

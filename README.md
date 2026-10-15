@@ -1,5 +1,7 @@
 # Flowcraft
 
+**Flowcraft Studio** is the visual workflow workspace at http://localhost:3000/. Build with 13 configurable block types, JSONata code, real HTTP requests and Groq AI, live step status, saved graph snapshots, and inspectable reports. Start with Revenue operations, Live repository intelligence, or Customer voice analyst. See [EDITOR_GUIDE.md](EDITOR_GUIDE.md).
+
 Flowcraft is a production-style academic workflow automation platform: a React Flow editor, generic TypeScript node registry, DAG validation/execution engine, NestJS API, Prisma/PostgreSQL persistence, Redis-ready queue boundary, and Docker deployment.
 
 ## Quick start
