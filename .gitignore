@@ -1,0 +1,17 @@
+node_modules
+.next
+dist
+.env
+coverage
+*.log
+artifacts
+test-results
+playwright-report
+*.tsbuildinfo
+node_modules/
+.next/
+dist/
+.env
+.env.*
+!.env.example
+artifacts/

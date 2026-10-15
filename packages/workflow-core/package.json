@@ -1,0 +1,9 @@
+{
+  "name": "@flowcraft/engine",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": { "test": "tsx --test src/index.test.ts", "typecheck": "tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --strict --esModuleInterop --skipLibCheck src/index.ts src/index.test.ts" },
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": { "@workflow/shared-types": "*" }
+}

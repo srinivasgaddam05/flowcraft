@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+enum ExecutionStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum NodeExecutionStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
+  RETRYING
+}
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String
+  name String
+  workflows Workflow[]
+  createdAt DateTime @default(now())
+}
+model Workflow {
+  id String @id @default(cuid())
+  name String
+  description String?
+  active Boolean @default(false)
+  ownerId String
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  nodes WorkflowNode[]
+  edges WorkflowEdge[]
+  executions Execution[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([ownerId, updatedAt])
+}
+model WorkflowNode {
+  id String @id
+  workflowId String
+  type String
+  name String
+  position Json
+  config Json
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  @@index([workflowId])
+}
+model WorkflowEdge {
+  id String @id
+  workflowId String
+  sourceNodeId String
+  targetNodeId String
+  sourceHandle String?
+  targetHandle String?
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  @@index([workflowId])
+}
+model Execution {
+  id String @id @default(cuid())
+  workflowId String
+  status ExecutionStatus @default(QUEUED)
+  triggerData Json?
+  error String?
+  startedAt DateTime?
+  completedAt DateTime?
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  nodes ExecutionNode[]
+  createdAt DateTime @default(now())
+  @@index([workflowId, createdAt])
+}
+model ExecutionNode {
+  id String @id @default(cuid())
+  executionId String
+  nodeId String
+  status NodeExecutionStatus @default(PENDING)
+  input Json?
+  output Json?
+  error String?
+  startedAt DateTime?
+  completedAt DateTime?
+  duration Int?
+  execution Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  @@unique([executionId, nodeId])
+}
