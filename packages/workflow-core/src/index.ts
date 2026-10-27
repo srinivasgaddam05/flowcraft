@@ -5,6 +5,10 @@ export interface NodeContext {
   workflowId: string;
   input: unknown;
   variables: Record<string, unknown>;
+  /** Throws when an execution is cancelled; long-running nodes call between remote operations. */
+  checkCancelled?: () => Promise<void>;
+  /** Publishes durable intermediate output while the node remains running. */
+  reportProgress?: (progress: { message: string; data?: unknown }) => Promise<void>;
 }
 
 export interface NodeResult { data: unknown; branch?: 'true' | 'false'; }
@@ -62,6 +66,7 @@ export async function executeDag(
   emit: (event: { type: string; nodeId?: string; data?: unknown; message?: string }) => Promise<void>,
   initialInput: unknown = {},
   triggerNodeId?: string,
+  options: { checkCancelled?: () => Promise<void> } = {},
 ): Promise<void> {
   const errors = validateDag(nodes, edges);
   if (errors.length) throw new Error(errors.join('; '));
@@ -85,6 +90,7 @@ export async function executeDag(
   const inactiveEdges = new Set<string>();
   const skippedNodes = new Set<string>();
   while (remaining.size) {
+    await options.checkCancelled?.();
     const next = nodes.find((node) => remaining.has(node.id) && edges.filter((edge) => edge.target === node.id).every((edge) => inactiveEdges.has(edge.id) || !remaining.has(edge.source)));
     if (!next) throw new Error('Unable to determine execution order');
     const incoming = edges.filter((edge) => edge.target === next.id);
@@ -102,12 +108,31 @@ export async function executeDag(
     const parentOutputs = activeIncoming.filter((edge) => !skippedNodes.has(edge.source)).map((edge) => outputs.get(edge.source));
     const input = parentOutputs.length === 0 ? initialInput : parentOutputs.length === 1 ? parentOutputs[0] : parentOutputs;
     await emit({ type: 'node.started', nodeId: next.id, data: input });
+    let progressOpen = true;
+    let progressTail = Promise.resolve();
+    const reportProgress: NonNullable<NodeContext['reportProgress']> = (progress) => {
+      if (!progressOpen) return Promise.resolve();
+      const pending = progressTail.then(async () => {
+        if (!progressOpen) return;
+        await options.checkCancelled?.();
+        if (progressOpen) await emit({ type: 'node.progress', nodeId: next.id, data: progress.data, message: progress.message });
+      });
+      progressTail = pending;
+      // Also handle executors that submit a progress update without awaiting its promise.
+      void pending.catch(() => undefined);
+      return pending;
+    };
     try {
-      const result = await registry.get(next.type).execute({ executionId, workflowId, input, variables: Object.fromEntries(outputs) }, next.config);
+      const result = await registry.get(next.type).execute({ executionId, workflowId, input, variables: Object.fromEntries(outputs), checkCancelled: options.checkCancelled, reportProgress }, next.config);
+      progressOpen = false;
+      await progressTail;
+      await options.checkCancelled?.();
       outputs.set(next.id, result.data);
       if (result.branch) for (const edge of edges.filter((candidate) => candidate.source === next.id && candidate.sourceHandle && candidate.sourceHandle !== result.branch)) inactiveEdges.add(edge.id);
       await emit({ type: 'node.completed', nodeId: next.id, data: result.data });
     } catch (error) {
+      progressOpen = false;
+      await progressTail.catch(() => undefined);
       await emit({ type: 'node.failed', nodeId: next.id, message: error instanceof Error ? error.message : 'Node failed' });
       throw error;
     }

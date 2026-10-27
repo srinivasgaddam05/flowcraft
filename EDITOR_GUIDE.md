@@ -44,6 +44,9 @@ Unsaved graph and code drafts are stored in the current browser per account and 
 | Condition | Routes based on a field, including nested paths such as `customer.tier` |
 | Delay | Pauses for 0–5000 ms |
 | HTTP Request | Makes real public HTTP(S) requests with configurable method, headers, body, and timeout |
+| Web Scraper | Extracts typed records and links from public HTML, with CSS selectors and pagination |
+| Apify Actor | Runs a real cloud Actor, reports progress, and waits for success |
+| Apify Dataset | Reads a bounded page of records from an existing or newly created dataset |
 | AI Analysis | Calls the server’s configured Groq service and parses a JSON result |
 | Workflow Result | Presents a report title, summary, metrics, and underlying data |
 | Logger | Records the preceding output and a message |
@@ -149,4 +152,14 @@ npm run test:e2e
 
 The browser suite includes the editor, existing demos, account isolation, and cancellation. It uses installed Google Chrome and the running local stack. `PLAYWRIGHT_BASE_URL` can point the frontend checks at a separate local preview. Live HTTP and Groq tests call their real services.
 
-Failed queue jobs may retry up to three times. When configuring an HTTP endpoint that changes external data, use the external service’s idempotency support if repeated requests would matter.
+Failed queue jobs may retry up to three times; graphs containing Apify Actor use one attempt to reduce duplicate billed runs. When configuring an HTTP endpoint that changes external data, use the external service’s idempotency support if repeated requests would matter.
+
+## Live web scraping and Apify
+
+The library now includes **Web Scraper**, **Apify Actor**, and **Apify Dataset** under **Web & scraping**. Open **Recipes → Live price research** to run a six-step scrape without a key, or **Apify research pipeline** after configuring the server token. **Integrations** shows setup instructions and a real read-only Apify connection test.
+
+The scraper inspector provides editable CSS selectors and extraction fields, numeric conversion, absolute links, pagination, and page/record limits. Running nodes report progress while collecting pages; Apify progress includes a live Console run link. Final tables support search, numeric sorting, clickable source links, CSV export, and JSON download. CSV exports include the full dataset regardless of the table search.
+
+See [SCRAPING_GUIDE.md](SCRAPING_GUIDE.md) for the full workflow walkthrough, token setup, Actor billing limits, and website compatibility.
+
+When importing a workflow, direct JSONata references to old node IDs are updated alongside the regenerated node and edge IDs. This includes quoted `$nodes` paths and literal `$lookup($nodes, "id")` calls. Unrelated source data and text stay intact; IDs assembled dynamically inside expressions need to be updated manually.

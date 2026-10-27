@@ -4,6 +4,8 @@ import { Injectable } from '@nestjs/common';
 import { BadRequestException } from '@nestjs/common';
 import { evaluateExpression, readPath, resolveTemplates, validateExpression } from './expressions';
 import { NodeRegistry, type NodeContext, type WorkflowNodeExecutor } from '@flowcraft/engine';
+import { createWebScrapeExecutor } from './web-scrape';
+import { createApifyExecutors } from './apify';
 
 const simple = (type: string, label: string, category: 'trigger' | 'action', run: WorkflowNodeExecutor['execute']): WorkflowNodeExecutor => ({ type, label, category, validate: () => [], execute: async (context, config) => run(context, await resolveTemplates(config, context.input, context.variables) as Record<string, unknown>) });
 
@@ -36,6 +38,8 @@ const defaultTriageInstructions = [
 export class NodeService {
   readonly registry = new NodeRegistry();
   constructor() {
+    this.registry.register(createWebScrapeExecutor());
+    for (const executor of createApifyExecutors()) this.registry.register(executor);
     this.registry.register(simple('manualTrigger', 'Manual Trigger', 'trigger', async (context) => ({ data: context.input === undefined ? {} : context.input })));
     this.registry.register(simple('webhookTrigger', 'Webhook Trigger', 'trigger', async (context) => ({ data: context.input === undefined ? {} : context.input })));
     this.registry.register(simple('scheduleTrigger', 'Schedule Trigger', 'trigger', async (context) => ({ data: context.input ?? { scheduled: true } })));
@@ -147,13 +151,14 @@ export class NodeService {
       };
     }
   }
-  async preview(type: string, config: Record<string, unknown>, input: unknown): Promise<unknown> {
+  async preview(type: string, config: Record<string, unknown>, input: unknown, variables: Record<string, unknown> = {}): Promise<unknown> {
     if (!['expression', 'transform', 'condition', 'filter', 'aggregate', 'result', 'logger'].includes(type)) throw new BadRequestException('Preview supports data and logic nodes. Use Run workflow for triggers, HTTP, delays, and AI.');
+    if (!variables || typeof variables !== 'object' || Array.isArray(variables) || ![Object.prototype, null].includes(Object.getPrototypeOf(variables))) throw new BadRequestException('Preview node context must be a JSON object keyed by node ID');
     try {
       const executor = this.registry.get(type);
       const errors = executor.validate(config);
       if (errors.length) throw new Error(errors.join('; '));
-      return await executor.execute({ executionId: 'preview', workflowId: 'preview', input, variables: {} }, config);
+      return await executor.execute({ executionId: 'preview', workflowId: 'preview', input, variables }, config);
     } catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'Node preview failed'); }
   }
   list(): Array<{ type: string; label: string; category: string }> { return this.registry.list().map(({ type, label, category }) => ({ type, label, category })); }

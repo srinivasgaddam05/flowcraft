@@ -160,6 +160,7 @@ export class WorkflowsService implements OnModuleInit, OnModuleDestroy {
         if (record.startedAt) events.push({ type: 'execution.started', executionId: id, status: 'RUNNING', timestamp: record.startedAt.toISOString() });
         for (const node of record.nodes) {
           if (node.startedAt) events.push({ type: 'node.started', executionId: id, nodeId: node.nodeId, status: 'RUNNING', data: node.input, timestamp: node.startedAt.toISOString() });
+          if (node.status === 'RUNNING' && !node.completedAt && node.output !== null && node.output !== undefined) events.push({ type: 'node.progress', executionId: id, nodeId: node.nodeId, status: 'RUNNING', data: node.output, message: 'Node is running', timestamp: (node.startedAt ?? record.startedAt ?? record.createdAt).toISOString() });
           if (node.completedAt) {
             const type: ExecutionEvent['type'] = node.status === 'FAILED' ? 'node.failed' : node.status === 'SKIPPED' ? 'node.skipped' : 'node.completed';
             const status: ExecutionEvent['status'] = node.status === 'FAILED' ? 'FAILED' : node.status === 'SKIPPED' ? 'SKIPPED' : 'SUCCESS';
@@ -182,12 +183,16 @@ export class WorkflowsService implements OnModuleInit, OnModuleDestroy {
     if (!databaseEnabled || !event.nodeId) return;
     const node = workflow.nodes.find((candidate) => candidate.id === event.nodeId);
     if (!node) return;
+    if (event.type === 'node.progress') {
+      if (event.data !== undefined) await this.prisma.executionNode.updateMany({ where: { executionId, nodeId: node.id, status: 'RUNNING' }, data: { output: event.data === null ? Prisma.JsonNull : event.data as Prisma.InputJsonValue } });
+      return;
+    }
     const starting = event.type === 'node.started';
     const status = starting ? 'RUNNING' : event.type === 'node.completed' ? 'SUCCESS' : event.type === 'node.skipped' ? 'SKIPPED' : 'FAILED';
     const json = event.data === undefined || event.data === null ? Prisma.JsonNull : event.data as Prisma.InputJsonValue;
     const previous = !starting ? await this.prisma.executionNode.findUnique({ where: { executionId_nodeId: { executionId, nodeId: node.id } }, select: { startedAt: true } }) : undefined;
     const duration = previous?.startedAt ? Math.max(0, new Date(event.timestamp).getTime() - previous.startedAt.getTime()) : undefined;
-    const values = { status: status as 'RUNNING' | 'SUCCESS' | 'SKIPPED' | 'FAILED', ...(starting ? { input: json, error: null, startedAt: new Date(event.timestamp), completedAt: null } : { output: json, error: event.message ?? null, completedAt: new Date(event.timestamp), duration }) };
+    const values = { status: status as 'RUNNING' | 'SUCCESS' | 'SKIPPED' | 'FAILED', ...(starting ? { input: json, output: Prisma.JsonNull, error: null, startedAt: new Date(event.timestamp), completedAt: null, duration: null } : { ...(event.type === 'node.failed' && event.data === undefined ? {} : { output: json }), error: event.message ?? null, completedAt: new Date(event.timestamp), duration }) };
     await this.prisma.executionNode.upsert({ where: { executionId_nodeId: { executionId, nodeId: node.id } }, create: { id: `${executionId}-${node.id}`, executionId, nodeId: node.id, ...values }, update: values });
   }
   async runQueued(id: string, executionId: string, triggerData: unknown = {}, triggerNodeId?: string): Promise<void> {
@@ -198,8 +203,8 @@ export class WorkflowsService implements OnModuleInit, OnModuleDestroy {
       const started: ExecutionEvent = { type: 'execution.started', executionId, status: 'RUNNING', timestamp: new Date().toISOString() }; this.recordEvent(started); await this.persistExecution(executionId, 'RUNNING', started.timestamp); this.events.publish(started);
       await executeDag(id, executionId, workflow.nodes, workflow.edges, this.nodes.registry, async (event) => {
         if (await this.isCancelled(executionId)) throw new Error('Execution cancelled');
-        const update: ExecutionEvent = { type: event.type as ExecutionEvent['type'], executionId, nodeId: event.nodeId, data: event.data, message: event.message, status: event.type.endsWith('failed') ? 'FAILED' : event.type.endsWith('started') ? 'RUNNING' : event.type.endsWith('skipped') ? 'SKIPPED' : 'SUCCESS', timestamp: new Date().toISOString() }; this.recordEvent(update); await this.persistNodeEvent(executionId, workflow, update); this.events.publish(update);
-      }, triggerData, triggerNodeId);
+        const update: ExecutionEvent = { type: event.type as ExecutionEvent['type'], executionId, nodeId: event.nodeId, data: event.data, message: event.message, status: event.type.endsWith('failed') ? 'FAILED' : event.type.endsWith('started') || event.type === 'node.progress' ? 'RUNNING' : event.type.endsWith('skipped') ? 'SKIPPED' : 'SUCCESS', timestamp: new Date().toISOString() }; this.recordEvent(update); await this.persistNodeEvent(executionId, workflow, update); this.events.publish(update);
+      }, triggerData, triggerNodeId, { checkCancelled: async () => { if (await this.isCancelled(executionId)) throw new Error('Execution cancelled'); } });
       if (await this.isCancelled(executionId)) return;
       const completed: ExecutionEvent = { type: 'execution.completed', executionId, status: 'SUCCESS', timestamp: new Date().toISOString() }; this.recordEvent(completed); await this.persistExecution(executionId, 'SUCCESS', undefined, completed.timestamp); this.events.publish(completed);
     } catch (error) {
@@ -217,7 +222,9 @@ export class WorkflowsService implements OnModuleInit, OnModuleDestroy {
     const executionId = randomUUID();
     const queued: ExecutionEvent = { type: 'execution.started', executionId, status: 'QUEUED', timestamp: new Date().toISOString() }; this.executions.set(executionId, { id: executionId, workflowId: id, status: 'QUEUED', events: [queued], input: triggerData, triggerNodeId, workflow: structuredClone(workflow) }); if (databaseEnabled) await this.prisma.execution.create({ data: { id: executionId, workflowId: id, status: 'QUEUED', triggerData: triggerData === null ? Prisma.JsonNull : triggerData as Prisma.InputJsonValue, triggerNodeId, workflowSnapshot: workflow as unknown as Prisma.InputJsonValue } }); this.events.publish(queued);
     try {
-      await this.queue.enqueue({ workflowId: id, executionId, triggerData, triggerNodeId }, () => this.runQueued(id, executionId, triggerData, triggerNodeId));
+      // An Actor launch creates a billed remote run. Retrying the whole graph could launch it twice.
+      const attempts = workflow.nodes.some((node) => node.type === 'apifyActor') ? 1 : 3;
+      await this.queue.enqueue({ workflowId: id, executionId, triggerData, triggerNodeId }, () => this.runQueued(id, executionId, triggerData, triggerNodeId), { attempts });
     } catch (error) {
       const failed: ExecutionEvent = { type: 'execution.failed', executionId, status: 'FAILED', timestamp: new Date().toISOString(), message: 'Unable to queue execution' };
       this.recordEvent(failed);

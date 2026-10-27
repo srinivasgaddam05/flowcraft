@@ -28,7 +28,7 @@ export interface WorkflowDocument {
 }
 
 export interface ExecutionEvent {
-  type: 'execution.started' | 'node.started' | 'node.completed' | 'node.failed' | 'node.skipped' | 'execution.completed' | 'execution.failed' | 'execution.cancelled';
+  type: 'execution.started' | 'node.started' | 'node.progress' | 'node.completed' | 'node.failed' | 'node.skipped' | 'execution.completed' | 'execution.failed' | 'execution.cancelled';
   executionId: string;
   nodeId?: string;
   status: ExecutionStatus | NodeStatus;

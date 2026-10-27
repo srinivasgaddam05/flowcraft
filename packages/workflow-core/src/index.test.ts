@@ -78,3 +78,88 @@ test('a selected webhook cannot execute disconnected actions', async () => {
   assert.deepEqual(executed, ['webhookTrigger', 'logger']);
   assert.deepEqual(skipped, ['disconnected']);
 });
+
+test('cancelled executions stop before starting a node', async () => {
+  const events: string[] = [];
+  const registry = new NodeRegistry();
+  registry.register({ type: 'manualTrigger', label: 'Trigger', category: 'trigger', validate: () => [], execute: async () => { throw new Error('Must not execute'); } });
+  await assert.rejects(executeDag('workflow', 'execution', [node('trigger', 'manualTrigger')], [], registry, async (event) => { events.push(event.type); }, {}, 'trigger', { checkCancelled: async () => { throw new Error('Execution cancelled'); } }), /Execution cancelled/);
+  assert.deepEqual(events, []);
+});
+
+test('long-running executors receive a cancellation hook and stop between remote operations', async () => {
+  const registry = new NodeRegistry();
+  let cancelled = false;
+  const operations: string[] = [];
+  const events: string[] = [];
+  registry.register({ type: 'manualTrigger', label: 'Trigger', category: 'trigger', validate: () => [], execute: async ({ input }) => ({ data: input }) });
+  registry.register({ type: 'scrape', label: 'Scrape', category: 'action', validate: () => [], execute: async (context) => {
+    await context.checkCancelled?.();
+    operations.push('first page'); cancelled = true;
+    await context.checkCancelled?.();
+    operations.push('second page'); return { data: {} };
+  } });
+  await assert.rejects(executeDag('workflow', 'execution', [node('trigger', 'manualTrigger'), node('scrape', 'scrape')], [edge('a', 'trigger', 'scrape')], registry, async (event) => { events.push(`${event.type}:${event.nodeId}`); }, {}, 'trigger', { checkCancelled: async () => { if (cancelled) throw new Error('Execution cancelled'); } }), /Execution cancelled/);
+  assert.deepEqual(operations, ['first page']);
+  assert.ok(events.includes('node.failed:scrape'));
+  assert.ok(!events.includes('node.completed:scrape'));
+});
+
+test('cancellation after a node returns prevents its output and downstream work', async () => {
+  const registry = new NodeRegistry();
+  let cancelled = false;
+  const events: string[] = [];
+  const executed: string[] = [];
+  registry.register({ type: 'manualTrigger', label: 'Trigger', category: 'trigger', validate: () => [], execute: async () => { executed.push('trigger'); cancelled = true; return { data: 'must not publish' }; } });
+  registry.register({ type: 'logger', label: 'Logger', category: 'action', validate: () => [], execute: async () => { executed.push('logger'); return { data: {} }; } });
+  await assert.rejects(executeDag('workflow', 'execution', [node('trigger', 'manualTrigger'), node('logger', 'logger')], [edge('a', 'trigger', 'logger')], registry, async (event) => { events.push(`${event.type}:${event.nodeId}`); }, {}, 'trigger', { checkCancelled: async () => { if (cancelled) throw new Error('Execution cancelled'); } }), /Execution cancelled/);
+  assert.deepEqual(executed, ['trigger']);
+  assert.deepEqual(events, ['node.started:trigger', 'node.failed:trigger']);
+});
+
+test('long-running nodes report progress while downstream nodes receive only their final output', async () => {
+  const registry = new NodeRegistry();
+  const events: Array<{ type: string; nodeId?: string; data?: unknown; message?: string }> = [];
+  let downstream: unknown;
+  registry.register({ type: 'manualTrigger', label: 'Trigger', category: 'trigger', validate: () => [], execute: async ({ input }) => ({ data: input }) });
+  registry.register({ type: 'remote', label: 'Remote operation', category: 'action', validate: () => [], execute: async (context) => {
+    await context.reportProgress?.({ message: 'Remote run started', data: { runId: 'remote-123', status: 'RUNNING' } });
+    await context.reportProgress?.({ message: 'Reading dataset', data: { runId: 'remote-123', status: 'SUCCEEDED' } });
+    return { data: { items: [{ title: 'A real result' }] } };
+  } });
+  registry.register({ type: 'logger', label: 'Logger', category: 'action', validate: () => [], execute: async ({ input }) => { downstream = input; return { data: input }; } });
+  await executeDag('workflow', 'execution', [node('trigger', 'manualTrigger'), node('remote', 'remote'), node('result', 'logger')], [edge('a', 'trigger', 'remote'), edge('b', 'remote', 'result')], registry, async (event) => { events.push(event); }, { url: 'https://example.com' }, 'trigger');
+  assert.deepEqual(events.filter((event) => event.type === 'node.progress'), [
+    { type: 'node.progress', nodeId: 'remote', message: 'Remote run started', data: { runId: 'remote-123', status: 'RUNNING' } },
+    { type: 'node.progress', nodeId: 'remote', message: 'Reading dataset', data: { runId: 'remote-123', status: 'SUCCEEDED' } },
+  ]);
+  assert.deepEqual(downstream, { items: [{ title: 'A real result' }] });
+  assert.ok(events.findIndex((event) => event.type === 'node.completed' && event.nodeId === 'remote') > events.map((event) => event.type).lastIndexOf('node.progress'));
+});
+
+test('progress callbacks retained after an executor settles cannot change its terminal state', async () => {
+  const registry = new NodeRegistry();
+  const events: string[] = [];
+  let report: NonNullable<Parameters<WorkflowNodeExecutor['execute']>[0]['reportProgress']> | undefined;
+  registry.register({ type: 'manualTrigger', label: 'Trigger', category: 'trigger', validate: () => [], execute: async (context) => {
+    report = context.reportProgress;
+    await report?.({ message: 'Before completion', data: { status: 'RUNNING' } });
+    return { data: { status: 'SUCCESS' } };
+  } });
+  await executeDag('workflow', 'execution', [node('trigger', 'manualTrigger')], [], registry, async ({ type }) => { events.push(type); });
+  await report?.({ message: 'Stale callback', data: { status: 'RUNNING' } });
+  assert.deepEqual(events, ['node.started', 'node.progress', 'node.completed']);
+});
+
+test('cancellation prevents new progress output and node completion', async () => {
+  const registry = new NodeRegistry();
+  const events: string[] = [];
+  let cancelled = false;
+  registry.register({ type: 'manualTrigger', label: 'Trigger', category: 'trigger', validate: () => [], execute: async (context) => {
+    cancelled = true;
+    await context.reportProgress?.({ message: 'Must not publish', data: { runId: 'cancelled' } });
+    return { data: {} };
+  } });
+  await assert.rejects(executeDag('workflow', 'execution', [node('trigger', 'manualTrigger')], [], registry, async ({ type }) => { events.push(type); }, {}, undefined, { checkCancelled: async () => { if (cancelled) throw new Error('Execution cancelled'); } }), /cancelled/);
+  assert.deepEqual(events, ['node.started', 'node.failed']);
+});

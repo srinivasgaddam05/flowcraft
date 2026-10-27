@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { NodeService } from './nodes';
-import type { WorkflowJob } from './queue.service';
+import type { EnqueueOptions, WorkflowJob } from './queue.service';
 import { WorkflowsService } from './workflows.service';
 
-type QueuedJob = { job: WorkflowJob; runner: () => Promise<void> };
+type QueuedJob = { job: WorkflowJob; runner: () => Promise<void>; options?: EnqueueOptions };
 function createService(queuedJobs: QueuedJob[] = []): WorkflowsService {
-  const queue = { enqueue: async (job: WorkflowJob, runner: () => Promise<void>) => { queuedJobs.push({ job, runner }); } };
+  const queue = { enqueue: async (job: WorkflowJob, runner: () => Promise<void>, options?: EnqueueOptions) => { queuedJobs.push({ job, runner, options }); } };
   const events = { publish: () => undefined };
   return new WorkflowsService({} as never, new NodeService(), queue as never, events as never);
 }
@@ -162,6 +162,44 @@ test('cancelled queued executions never start', async () => {
   const record = await service.getExecution(run.executionId, 'owner-a');
   assert.equal(record.status, 'CANCELLED');
   assert.equal(record.events.some((event) => event.type === 'node.started'), false);
+});
+
+test('running integrations observe cancellation before a second external operation', async () => {
+  const jobs: QueuedJob[] = [];
+  const nodes = new NodeService();
+  const service = new WorkflowsService({} as never, nodes, { enqueue: async (job: WorkflowJob, runner: () => Promise<void>) => { jobs.push({ job, runner }); } } as never, { publish: () => undefined } as never);
+  let firstOperation!: () => void;
+  const reachedFirstOperation = new Promise<void>((resolve) => { firstOperation = resolve; });
+  let resume!: () => void;
+  const released = new Promise<void>((resolve) => { resume = resolve; });
+  const operations: string[] = [];
+  nodes.registry.register({ type: 'longIntegration', label: 'Long integration', category: 'action', validate: () => [], execute: async (context) => {
+    operations.push('first request'); firstOperation(); await released;
+    await context.checkCancelled?.();
+    operations.push('second request'); return { data: {} };
+  } });
+  const saved = await service.save({ ...workflow, nodes: workflow.nodes.map((node) => node.id === 'logger' ? { ...node, type: 'longIntegration' } : node) }, 'owner-a');
+  const queued = await service.execute(saved.id!, 'owner-a');
+  const running = jobs[0].runner();
+  await reachedFirstOperation;
+  await service.cancel(queued.executionId, 'owner-a');
+  resume(); await running;
+  const record = await service.getExecution(queued.executionId, 'owner-a');
+  assert.deepEqual(operations, ['first request']);
+  assert.equal(record.status, 'CANCELLED');
+  assert.equal(record.events.some((event) => ['execution.failed', 'execution.completed'].includes(event.type)), false);
+});
+
+test('Actor workflows disable whole-workflow retries to avoid duplicate remote runs', async () => {
+  const jobs: QueuedJob[] = [];
+  const nodes = new NodeService();
+  nodes.registry.register({ type: 'apifyActor', label: 'Apify Actor', category: 'action', validate: () => [], execute: async () => ({ data: {} }) });
+  const service = new WorkflowsService({} as never, nodes, { enqueue: async (job: WorkflowJob, runner: () => Promise<void>, options?: EnqueueOptions) => { jobs.push({ job, runner, options }); } } as never, { publish: () => undefined } as never);
+  const normal = await service.save(workflow, 'owner-a');
+  await service.execute(normal.id!, 'owner-a');
+  const actor = await service.save({ ...workflow, nodes: workflow.nodes.map((node) => node.id === 'logger' ? { ...node, type: 'apifyActor' } : node) }, 'owner-a');
+  await service.execute(actor.id!, 'owner-a');
+  assert.deepEqual(jobs.map(({ options }) => options?.attempts), [3, 1]);
 });
 
 test('records failed queue submissions rather than leaving them queued', async () => {

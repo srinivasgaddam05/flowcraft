@@ -3,14 +3,16 @@ import type { WorkflowDocument } from '@workflow/shared-types';
 import { NodeService } from './nodes';
 import { WorkflowsService } from './workflows.service';
 import { AuthGuard, type AuthenticatedRequest } from './auth.guard';
+import { checkApifyConnection } from './apify';
 
 @Controller()
 export class AppController {
   constructor(@Inject(WorkflowsService) private readonly workflows: WorkflowsService, @Inject(NodeService) private readonly nodes: NodeService) {}
   @Get('health') health(): { status: string } { return { status: 'ok' }; }
-  @Get('capabilities') @UseGuards(AuthGuard) capabilities(): unknown { return { aiConfigured: Boolean(process.env.GROQ_API_KEY) }; }
+  @Get('capabilities') @UseGuards(AuthGuard) capabilities(): unknown { return { aiConfigured: Boolean(process.env.GROQ_API_KEY), webScrapingAvailable: true, apifyConfigured: Boolean(process.env.APIFY_API_TOKEN?.trim()) }; }
+  @Get('integrations/apify/status') @UseGuards(AuthGuard) apifyStatus(): ReturnType<typeof checkApifyConnection> { return checkApifyConnection(); }
   @Get('nodes') listNodes(): unknown { return this.nodes.list(); }
-  @Post('nodes/:type/preview') @UseGuards(AuthGuard) preview(@Param('type') type: string, @Body() body: { config?: Record<string, unknown>; input?: unknown }): Promise<unknown> { return this.nodes.preview(type, body?.config ?? {}, body?.input === undefined ? {} : body.input); }
+  @Post('nodes/:type/preview') @UseGuards(AuthGuard) preview(@Param('type') type: string, @Body() body: { config?: Record<string, unknown>; input?: unknown; variables?: Record<string, unknown> }): Promise<unknown> { return this.nodes.preview(type, body?.config ?? {}, body?.input === undefined ? {} : body.input, body?.variables); }
   @Get('workflow-templates') @UseGuards(AuthGuard) templates(): unknown { return this.workflows.listTemplates(); }
   @Post('workflow-templates/:templateId/instantiate') @UseGuards(AuthGuard) instantiateTemplate(@Param('templateId') templateId: string, @Req() request: AuthenticatedRequest): Promise<WorkflowDocument> { return this.workflows.instantiateTemplate(templateId, request.user.id); }
   @Get('workflows') @UseGuards(AuthGuard) list(@Req() request: AuthenticatedRequest): Promise<WorkflowDocument[]> { return this.workflows.list(request.user.id); }

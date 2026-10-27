@@ -1,6 +1,6 @@
 # Flowcraft
 
-**Flowcraft Studio** is the visual workflow workspace at http://localhost:3000/. Build with 13 configurable block types, JSONata code, real HTTP requests and Groq AI, live step status, saved graph snapshots, and inspectable reports. Start with Revenue operations, Live repository intelligence, or Customer voice analyst. See [EDITOR_GUIDE.md](EDITOR_GUIDE.md).
+**Flowcraft Studio** is the visual workflow workspace at http://localhost:3000/. Build with 16 configurable block types, JSONata code, live web scraping, Apify cloud Actors and datasets, real HTTP requests and Groq AI. Inspect live step progress, saved graph snapshots, searchable datasets, CSV exports, and finished reports. Start with **Live price research** for a working scrape without an API key, or connect Apify in **Integrations**. See [EDITOR_GUIDE.md](EDITOR_GUIDE.md) and [SCRAPING_GUIDE.md](SCRAPING_GUIDE.md).
 
 Flowcraft is a production-style academic workflow automation platform: a React Flow editor, generic TypeScript node registry, DAG validation/execution engine, NestJS API, Prisma/PostgreSQL persistence, Redis-ready queue boundary, and Docker deployment.
 
@@ -28,7 +28,7 @@ Authentication is available through `POST /auth/register`, `POST /auth/login`, a
 
 Open the app at `http://localhost:3000`. The demo account is `demo@workflow.local` with the password supplied to the seed command. It is for local academic demos only; choose a different password for any shared environment. The initial migration is checked in under `prisma/migrations`.
 
-The Compose stack runs PostgreSQL, Redis, the NestJS API, a BullMQ worker, and the Next.js web app. The worker consumes the `workflow-execution` queue and retries failed jobs with exponential backoff; the editor and history view receive account-scoped live events over authenticated WebSockets, bridged from the worker through Redis.
+The Compose stack runs PostgreSQL, Redis, the NestJS API, a BullMQ worker, and the Next.js web app. The worker consumes the `workflow-execution` queue and retries failed jobs with exponential backoff (workflows containing Apify Actor use one attempt to reduce duplicate billed runs); the editor and history view receive account-scoped live events over authenticated WebSockets, bridged from the worker through Redis.
 
 PostgreSQL uses the named `postgres_data` volume. `docker compose down` keeps database contents; `docker compose down -v` deletes them. Back up the database before intentionally removing volumes.
 
@@ -52,6 +52,12 @@ npm run test:e2e
 ```
 
 The MVP includes manual, webhook, and interval-scheduled execution; node library/editor interactions; cycle and branch validation; JWT authentication; Swagger; Prisma persistence; live execution events; workflow and execution management; and Docker deployment. Cron schedules, OAuth credentials, and team-based access control are future enhancements.
+
+## Real web scraping and Apify
+
+Open http://localhost:3000/?recipe=scrape and select **Run workflow**. The six-node recipe fetches two pages from Books to Scrape, extracts 40 live listings, filters your budget, and builds a shortlist with CSV/JSON exports. This public practice catalogue uses fictional prices; the network requests and extraction are real. Edit the run input to change the budget or page count.
+
+For cloud scrapers, set `APIFY_API_TOKEN` in the ignored `.env`, then run `docker compose up -d --force-recreate api worker`. Open **Integrations**, test the account connection, and load the Apify research recipe. Actor starts have a timeout and cost limit, with a separate Dataset node for results. Missing credentials fail explicitly; results are never simulated. Full instructions: [SCRAPING_GUIDE.md](SCRAPING_GUIDE.md).
 
 ## Groq AI Support Triage node
 

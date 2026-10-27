@@ -103,6 +103,25 @@ test('node preview rejects external actions and malformed expression code', asyn
   assert.ok(nodes.registry.get('scheduleTrigger').validate({ intervalMs: 10 }).length);
 });
 
+test('node previews use upstream trigger and scraped outputs for filters and buying briefs', async () => {
+  const nodes = new NodeService();
+  const variables = {
+    trigger: { maxPrice: 25 },
+    scrape: { count: 2, pages: [{ url: 'https://books.toscrape.com/' }], sourceUrl: 'https://books.toscrape.com/', scrapedAt: '2026-10-15T00:00:00.000Z' },
+  };
+  const filtered = await nodes.preview('filter', { predicate: '$item.price <= $nodes.*.maxPrice' }, [{ title: 'Within budget', price: 10 }, { title: 'Over budget', price: 30 }], variables) as { data: unknown };
+  assert.deepEqual(filtered.data, [{ title: 'Within budget', price: 10 }]);
+  const metrics = await nodes.preview('aggregate', { valueField: 'price' }, filtered.data, variables) as { data: unknown };
+  const brief = await nodes.preview('expression', { expression: '($source := $single($nodes.*, function($v) { $exists($v.scrapedAt) }); $brief := $single($nodes.*, function($v) { $exists($v.maxPrice) }); { "productsCollected": $source.count, "matches": count, "budgetGBP": $brief.maxPrice, "averagePriceGBP": average, "pagesScraped": $count($source.pages), "sourceUrl": $source.sourceUrl, "items": items })' }, metrics.data, variables) as { data: unknown };
+  assert.deepEqual(brief.data, { productsCollected: 2, matches: 1, budgetGBP: 25, averagePriceGBP: 10, pagesScraped: 1, sourceUrl: 'https://books.toscrape.com/', items: [{ title: 'Within budget', price: 10 }] });
+});
+
+test('preview node context accepts JSON objects and rejects arrays, null, and non-object values', async () => {
+  const nodes = new NodeService();
+  for (const variables of [null, [], 'invalid', 42, new Date()]) await assert.rejects(nodes.preview('expression', { expression: '$json' }, {}, variables as never), /node context must be a JSON object/);
+  assert.deepEqual(await nodes.preview('expression', { expression: '$json' }, { value: 1 }), { data: { value: 1 } });
+});
+
 test('HTTP nodes cannot reach private IPv4, IPv6, or embedded credentials', async () => {
   const executor = new NodeService().registry.get('httpRequest');
   for (const url of ['http://127.0.0.1', 'http://[::1]', 'http://169.254.169.254/latest', 'https://user:password@example.com']) {

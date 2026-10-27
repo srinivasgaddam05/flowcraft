@@ -3,6 +3,7 @@ import { Queue } from 'bullmq';
 import { redisEnabled } from './config';
 
 export interface WorkflowJob { workflowId: string; executionId: string; triggerData?: unknown; triggerNodeId?: string }
+export interface EnqueueOptions { attempts?: 1 | 3 }
 
 @Injectable()
 export class QueueService implements OnModuleDestroy {
@@ -10,9 +11,9 @@ export class QueueService implements OnModuleDestroy {
   constructor() {
     if (redisEnabled) this.queue = new Queue<WorkflowJob>('workflow-execution', { connection: { url: process.env.REDIS_URL } });
   }
-  async enqueue(job: WorkflowJob, localRunner: () => Promise<void>): Promise<void> {
+  async enqueue(job: WorkflowJob, localRunner: () => Promise<void>, options: EnqueueOptions = {}): Promise<void> {
     if (this.queue) {
-      await this.queue.add('executeWorkflow', job, { attempts: 3, backoff: { type: 'exponential', delay: 1000 }, removeOnComplete: 100, removeOnFail: 100 });
+      await this.queue.add('executeWorkflow', job, { attempts: options.attempts ?? 3, backoff: { type: 'exponential', delay: 1000 }, removeOnComplete: 100, removeOnFail: 100 });
       return;
     }
     setImmediate(() => { void localRunner().catch(() => undefined); });

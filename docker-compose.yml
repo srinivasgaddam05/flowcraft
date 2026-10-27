@@ -20,6 +20,7 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
       API_PORT: 4000
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
     ports: ["4000:4000"]
@@ -36,6 +37,7 @@ services:
       DATABASE_URL: postgresql://workflow:workflow@postgres:5432/workflow_creator?schema=public
       REDIS_URL: redis://redis:6379
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      APIFY_API_TOKEN: ${APIFY_API_TOKEN:-}
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy }, api: { condition: service_healthy } }
   web:
     build: { context: ., dockerfile: docker/web.Dockerfile }

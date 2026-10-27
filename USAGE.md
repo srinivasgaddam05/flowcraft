@@ -38,6 +38,12 @@ For order validation, use `paid` for payment status and a total greater than zer
 
 The four AI applications use the server-side Groq key. They produce suggestions for review. The workflows record results and routes; they do not send real email, Slack messages, or notifications.
 
+## Run live web scraping
+
+Open http://localhost:3000/?recipe=scrape and click **Run workflow**. Flowcraft fetches a real public practice catalogue, follows the next page, extracts book titles/prices/links, filters books at or below your budget, and shows a buying shortlist. Search or sort its records and use **CSV** or **Download** for exports. Change `maxPrice` or `maxPages` in **Run input** and rerun.
+
+Select **Collect live book listings** to edit CSS selectors, add extraction fields, and control pagination. The native scraper reads HTML; JavaScript-rendered sites need a browser Actor. Open **Integrations** to check Apify setup and load its cloud scraping recipe. Apify requires a server-side `APIFY_API_TOKEN` in `.env` and may consume credits. See [SCRAPING_GUIDE.md](SCRAPING_GUIDE.md) for setup and limits.
+
 ## Start or restart the complete stack
 
 Docker Desktop must be running. From the project folder:
@@ -77,7 +83,7 @@ Avoid adding `-v` unless you intend to delete the database volume.
 
 ## Develop locally with persistence
 
-Use Node.js 22 or later. Stop the Docker API, worker, and web to release ports 3000 and 4000, while retaining PostgreSQL and Redis:
+Use Node.js 22.19 or later. Stop the Docker API, worker, and web to release ports 3000 and 4000, while retaining PostgreSQL and Redis:
 
 ```bash
 docker compose stop api worker web
@@ -106,7 +112,7 @@ This mode uses the same forms and engine with an in-process queue. Accounts, wor
 
 ## Edit and extend workflows
 
-The editor has been upgraded to Flowcraft Studio, with code editing, data mappings, node previews, live execution inspection, undo/redo, import/export, and three working recipes. See [EDITOR_GUIDE.md](EDITOR_GUIDE.md) for the complete walkthrough.
+The editor has been upgraded to Flowcraft Studio, with code editing, data mappings, node previews, live execution inspection, undo/redo, import/export, and five working recipes, including live web scraping and Apify. See [EDITOR_GUIDE.md](EDITOR_GUIDE.md) for the complete walkthrough.
 
 Open **Workflows**, then open a saved workflow. Click a node to inspect its configuration. Add blocks from the library, connect their handles, and configure each action. Condition nodes have separate TRUE and FALSE outputs. Comparison values support numbers, booleans, and plain text. Use the validation button before saving. Activate the workflow to accept webhooks or schedules; deactivate it to stop new trigger events.
 

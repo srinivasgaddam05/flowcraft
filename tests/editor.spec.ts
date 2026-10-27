@@ -99,7 +99,7 @@ test('import, export, validation, search, history, layout and draft recovery wor
   await page.goto('/?recipe=blank');
   await page.getByLabel('Search blocks').fill('http'); await expect(page.locator('.studio-block')).toHaveCount(2); await page.getByLabel('Search blocks').fill('');
   await page.getByRole('button', { name: 'Import workflow', exact: true }).click();
-  const source = { name: 'Imported flow', nodes: [{ id: 's', type: 'manualTrigger', name: 'Start', position: { x: 0, y: 0 }, config: { sampleData: { value: 42 } } }, { id: 'r', type: 'result', name: 'Report', position: { x: 320, y: 0 }, config: { title: 'Imported report' } }], edges: [{ id: 'e', source: 's', target: 'r' }] };
+  const source = { name: 'Imported flow', nodes: [{ id: 's', type: 'manualTrigger', name: 'Start', position: { x: 0, y: 0 }, config: { sampleData: { value: 42 } } }, { id: 'r', type: 'result', name: 'Report', position: { x: 320, y: 0 }, config: { title: 'Imported report', summary: 'The upstream value is {{ $nodes."s".value }}.' } }], edges: [{ id: 'e', source: 's', target: 'r' }] };
   await inputCode(page, 'Workflow import JSON', JSON.stringify(source));
   await page.getByRole('button', { name: 'Import workflow', exact: true }).last().click();
   await expect(page.getByRole('textbox', { name: 'Workflow name' })).toHaveValue('Imported flow');
@@ -113,6 +113,7 @@ test('import, export, validation, search, history, layout and draft recovery wor
   await expect(page.getByRole('textbox', { name: 'Workflow name' })).toHaveValue('Imported flow draft');
   await page.getByRole('button', { name: 'Run workflow', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: 'Imported report', exact: true })).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('.studio-report')).toContainText('The upstream value is 42.');
   await page.getByRole('button', { name: 'Run history', exact: true }).last().click(); await expect(page.locator('.studio-history-row')).toHaveCount(1);
 });
 
